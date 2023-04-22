@@ -14,6 +14,8 @@ from torchvision import transforms
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KernelDensity
 
+import torch.distributed as dist
+
 from models import (
     Model_cnn_mlp,
     Model_Cond_Discrete,
@@ -139,8 +141,9 @@ def train_claw(experiment, n_epoch, lrate, device, n_hidden, batch_size, n_T, ne
     torch_data_train = ClawCustomDataset(
         DATASET_PATH, transform=tf, train_or_test="train", train_prop=0.90
     )
+    train_sampler = DistributedSampler(torch_data_train)
     dataload_train = DataLoader(
-        torch_data_train, batch_size=batch_size, shuffle=True, num_workers=0
+        torch_data_train, sampler=train_sampler, batch_size=batch_size, shuffle=True, num_workers=4
     )
 
     x_shape = torch_data_train.image_all.shape[1:]
@@ -266,7 +269,7 @@ def train_claw(experiment, n_epoch, lrate, device, n_hidden, batch_size, n_T, ne
     else:
         raise NotImplementedError
 
-    model.to(device)
+    model = nn.DataParallel(model, device_ids=[0, 1, 2, 3])
     optim = torch.optim.Adam(model.parameters(), lr=lrate)
 
     for ep in tqdm(range(n_epoch), desc="Epoch"):
@@ -366,5 +369,6 @@ def train_claw(experiment, n_epoch, lrate, device, n_hidden, batch_size, n_T, ne
 
 if __name__ == "__main__":
     os.makedirs(SAVE_DATA_DIR, exist_ok=True)
+    torch.distributed.init_process_group('nccl', init_method='env://')
     for experiment in EXPERIMENTS:
         train_claw(experiment, n_epoch, lrate, device, n_hidden, batch_size, n_T, net_type, EXTRA_DIFFUSION_STEPS, GUIDE_WEIGHTS)
